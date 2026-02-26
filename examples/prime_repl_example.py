@@ -1,5 +1,3 @@
-import os
-
 from dotenv import load_dotenv
 
 from rlm import RLM
@@ -11,10 +9,7 @@ logger = RLMLogger(log_dir="./logs")
 
 rlm = RLM(
     backend="openai",
-    backend_kwargs={
-        "api_key": os.getenv("OPENAI_API_KEY"),
-        "model_name": "gpt-5-nano",
-    },
+    backend_kwargs={},
     environment="prime",
     environment_kwargs={
         "name": "rlm-prime-demo",
