@@ -10,4 +10,3 @@ autoCommit = true
 
 [trackerOptions]
 [agentOptions]
-model="openai/gpt-5.3-codex"
