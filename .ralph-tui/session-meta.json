@@ -1,0 +1,14 @@
+{
+  "id": "68b645b0-219d-4d89-8b81-5234acf4e446",
+  "status": "running",
+  "startedAt": "2026-02-26T05:03:17.242Z",
+  "updatedAt": "2026-02-26T05:03:17.242Z",
+  "agentPlugin": "opencode",
+  "trackerPlugin": "json",
+  "prdPath": "./tasks/prd.json",
+  "currentIteration": 0,
+  "maxIterations": 10,
+  "totalTasks": 0,
+  "tasksCompleted": 0,
+  "cwd": "/Users/laansdole/Projects/rlm"
+}

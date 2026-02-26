@@ -10,12 +10,48 @@ from rlm.core.types import ModelUsageSummary, UsageSummary
 
 load_dotenv()
 
-# Load API keys from environment variables
-DEFAULT_OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-DEFAULT_OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-DEFAULT_VERCEL_API_KEY = os.getenv("AI_GATEWAY_API_KEY")
-DEFAULT_PRIME_API_KEY = os.getenv("PRIME_API_KEY")
+OPENAI_MODEL_ENV_VARS = (
+    "OPENAI_MODEL",
+    "OPENAI_MODEL_NAME",
+    "RLM_MODEL_NAME",
+    "MODEL_NAME",
+)
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+VERCEL_BASE_URL = "https://ai-gateway.vercel.sh/v1"
 DEFAULT_PRIME_INTELLECT_BASE_URL = "https://api.pinference.ai/api/v1/"
+
+
+def _normalize_base_url(base_url: str | None) -> str | None:
+    return base_url.rstrip("/") if base_url else None
+
+
+def _resolve_model_name(model_name: str | None) -> str | None:
+    if model_name:
+        return model_name
+    for env_var in OPENAI_MODEL_ENV_VARS:
+        value = os.getenv(env_var)
+        if value:
+            return value
+    return None
+
+
+def _resolve_api_key(base_url: str | None, api_key: str | None) -> tuple[str | None, str]:
+    if api_key:
+        return api_key, "(explicit api_key argument)"
+
+    normalized_base_url = _normalize_base_url(base_url)
+    if normalized_base_url == _normalize_base_url(OPENROUTER_BASE_URL):
+        return os.getenv("OPENROUTER_API_KEY"), "OPENROUTER_API_KEY"
+    if normalized_base_url == _normalize_base_url(VERCEL_BASE_URL):
+        return os.getenv("AI_GATEWAY_API_KEY"), "AI_GATEWAY_API_KEY"
+    if normalized_base_url == _normalize_base_url(DEFAULT_PRIME_INTELLECT_BASE_URL):
+        return os.getenv("PRIME_API_KEY"), "PRIME_API_KEY"
+    return os.getenv("OPENAI_API_KEY"), "OPENAI_API_KEY"
+
+
+def _is_valid_base_url(base_url: str) -> bool:
+    return base_url.startswith("http://") or base_url.startswith("https://")
 
 
 class OpenAIClient(BaseLM):
@@ -34,17 +70,24 @@ class OpenAIClient(BaseLM):
         base_url: str | None = None,
         **kwargs,
     ):
-        super().__init__(model_name=model_name, **kwargs)
+        super().__init__(model_name=model_name or "unknown", **kwargs)
 
-        if api_key is None:
-            if base_url == "https://api.openai.com/v1" or base_url is None:
-                api_key = DEFAULT_OPENAI_API_KEY
-            elif base_url == "https://openrouter.ai/api/v1":
-                api_key = DEFAULT_OPENROUTER_API_KEY
-            elif base_url == "https://ai-gateway.vercel.sh/v1":
-                api_key = DEFAULT_VERCEL_API_KEY
-            elif base_url == DEFAULT_PRIME_INTELLECT_BASE_URL:
-                api_key = DEFAULT_PRIME_API_KEY
+        base_url = base_url or os.getenv("OPENAI_BASE_URL")
+        if base_url and not _is_valid_base_url(base_url):
+            raise ValueError(
+                "Invalid OpenAI base_url. Expected a full URL beginning with http:// or https:// "
+                "(for example, 'http://localhost:1234/v1'). "
+                "Set OPENAI_BASE_URL in .env or pass base_url in backend_kwargs."
+            )
+
+        api_key, api_key_source = _resolve_api_key(base_url, api_key)
+        if not api_key:
+            raise ValueError(
+                f"OpenAI API key is required but was not found from {api_key_source}. "
+                "Set it in .env or pass api_key in backend_kwargs."
+            )
+
+        model_name = _resolve_model_name(model_name)
 
         # Pass through arbitrary kwargs to the OpenAI client (e.g. default_headers, default_query, max_retries).
         # Exclude model_name since it is not an OpenAI client constructor argument.
@@ -76,17 +119,23 @@ class OpenAIClient(BaseLM):
 
         model = model or self.model_name
         if not model:
-            raise ValueError("Model name is required for OpenAI client.")
+            raise ValueError(
+                "Model name is required for OpenAI client. "
+                "Set backend_kwargs['model_name'] or set one of these .env vars: "
+                f"{', '.join(OPENAI_MODEL_ENV_VARS)}"
+            )
 
         extra_body = {}
-        if self.client.base_url == DEFAULT_PRIME_INTELLECT_BASE_URL:
+        if _normalize_base_url(str(self.client.base_url)) == _normalize_base_url(
+            DEFAULT_PRIME_INTELLECT_BASE_URL
+        ):
             extra_body["usage"] = {"include": True}
 
         response = self.client.chat.completions.create(
             model=model, messages=messages, extra_body=extra_body
         )
         self._track_cost(response, model)
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""
 
     async def acompletion(
         self, prompt: str | list[dict[str, Any]], model: str | None = None
@@ -100,19 +149,25 @@ class OpenAIClient(BaseLM):
 
         model = model or self.model_name
         if not model:
-            raise ValueError("Model name is required for OpenAI client.")
+            raise ValueError(
+                "Model name is required for OpenAI client. "
+                "Set backend_kwargs['model_name'] or set one of these .env vars: "
+                f"{', '.join(OPENAI_MODEL_ENV_VARS)}"
+            )
 
         extra_body = {}
-        if self.client.base_url == DEFAULT_PRIME_INTELLECT_BASE_URL:
+        if _normalize_base_url(str(self.client.base_url)) == _normalize_base_url(
+            DEFAULT_PRIME_INTELLECT_BASE_URL
+        ):
             extra_body["usage"] = {"include": True}
 
         response = await self.async_client.chat.completions.create(
             model=model, messages=messages, extra_body=extra_body
         )
         self._track_cost(response, model)
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""
 
-    def _track_cost(self, response: openai.ChatCompletion, model: str):
+    def _track_cost(self, response: Any, model: str):
         self.model_call_counts[model] += 1
 
         usage = getattr(response, "usage", None)
